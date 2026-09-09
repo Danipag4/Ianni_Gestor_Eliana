@@ -1,4 +1,5 @@
 from pathlib import Path
+from html import escape
 import unicodedata
 
 import streamlit as st
@@ -88,7 +89,8 @@ arquivo_csv = pasta_script / nome_csv
 if not arquivo_csv.is_file():
     st.error(
         "Não foi possível localizar a base de dados CSV. "
-        f"Coloque '{nome_csv}' na mesma pasta deste arquivo:\n{arquivo_csv}"
+        f"Coloque '{nome_csv}' na mesma pasta deste arquivo.\n\n"
+        f"Caminho procurado: {arquivo_csv}"
     )
     st.stop()
 
@@ -103,6 +105,7 @@ def normalizar_coluna(nome):
 df.columns = [normalizar_coluna(coluna) for coluna in df.columns]
 df = df.rename(columns={
     "AVALIADO": "Nome",
+    "CARGO": "Cargo",
     "COMPETENCIA": "Competencia",
     "AVALIADOR": "Avaliador",
     "NOTA GESTOR": "Média Gestor"
@@ -110,6 +113,7 @@ df = df.rename(columns={
 
 colunas_obrigatorias = {
     "Nome": "",
+    "Cargo": "",
     "Competencia": "",
     "Avaliador": "",
     "Média Gestor": pd.NA
@@ -173,6 +177,8 @@ Nome = st.sidebar.selectbox(
 
 # Filtros e agregações do colaborador selecionado
 df_filtered = df[df["Colab"] == Nome]
+cargos_avaliado = df_filtered["Cargo"].dropna().astype(str).str.strip()
+cargo_avaliado = cargos_avaliado.iloc[0] if not cargos_avaliado.empty else "Não informado"
 df_Média = df_filtered.groupby("Compet")[["Gestor"]].mean().round(decimals=1).reset_index()
 aval = ["Gestor"]
 
@@ -192,15 +198,24 @@ if st.session_state.printing:
             st.image(str(logo_path), use_container_width=True)
     with col_titulo:
         st.markdown("# IANNI Agropecuária\n### Análise Geral de Competência")
-    st.write(f"### Colaborador Avaliado: **{Nome}**")
+    st.markdown(
+        f"""
+        <div style="text-align: center; margin: 12px 0 18px;">
+            <div style="font-size: 1.55rem; font-weight: 700;">Colaborador Avaliado: {escape(str(Nome))}</div>
+            <div style="font-size: 1.05rem; color: #4A5568; margin-top: 4px;">{escape(cargo_avaliado)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     st.markdown("---")
     
     # 1. Gráfico: Competências
     st.write("## Competências")
     fig_comp = px.bar(
         df_Média, 
-        y=aval, 
+        y="Gestor", 
         x="Compet", 
+        text="Gestor",
         barmode='group', 
         color_discrete_map=color_discrete_map
     )
@@ -209,6 +224,11 @@ if st.session_state.printing:
         yaxis_title="Médias",
         height=270,
         margin=dict(l=45, r=15, t=15, b=45)
+    )
+    fig_comp.update_traces(
+        texttemplate="%{text:.1f}",
+        textposition="outside",
+        cliponaxis=False
     )
     
     plotly_config_comp = {
@@ -268,22 +288,38 @@ else:
             st.image(str(logo_path), use_container_width=True)
     with col_titulo:
         st.markdown("# IANNI Agropecuária\n### Análise Geral de Competência")
+
+    st.markdown(
+        f"""
+        <div style="text-align: center; margin: 12px 0 18px;">
+            <div style="font-size: 1.55rem; font-weight: 700;">Colaborador Avaliado: {escape(str(Nome))}</div>
+            <div style="font-size: 1.05rem; color: #4A5568; margin-top: 4px;">{escape(cargo_avaliado)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     
     if st.button("🖨️ IMPRIMIR", key="btn_imprimir_top", type="primary"):
         st.session_state.printing = True
         st.rerun()
 
     # 1. Primeiro Gráfico: Competências
-    st.write(f"## Competências - **{Nome}**")
+    st.write("## Competências")
 
     fig_comp = px.bar(
         df_Média, 
-        y=aval, 
+        y="Gestor", 
         x="Compet", 
+        text="Gestor",
         barmode='group', 
         color_discrete_map=color_discrete_map
     )
     fig_comp.update_layout(xaxis_title="Competências", yaxis_title="Médias")
+    fig_comp.update_traces(
+        texttemplate="%{text:.1f}",
+        textposition="outside",
+        cliponaxis=False
+    )
 
     plotly_config_comp = {
         'displaylogo': False,
@@ -355,14 +391,21 @@ else:
     if AvalEquipe:
         df_equipe = df_opcoes
         
-        df_MédiaSetor = df_equipe.groupby("Nome")[aval].mean().round(decimals=1).reset_index()
+        df_MédiaSetor = (
+            df_equipe.groupby("Nome")[aval]
+            .mean()
+            .round(decimals=1)
+            .reset_index()
+            .sort_values("Gestor", ascending=False)
+        )
         
         altura_grafico = max(500, len(df_MédiaSetor) * 35)
         
         fig_Setor = px.bar(
             df_MédiaSetor, 
-            x=aval, 
+            x="Gestor", 
             y="Nome", 
+            text="Gestor",
             orientation="h", 
             height=altura_grafico, 
             barmode='group', 
@@ -372,7 +415,16 @@ else:
             xaxis_title="Média", 
             yaxis_title="Colaborador", 
             bargap=0.15, 
-            bargroupgap=0.05
+            bargroupgap=0.05,
+            yaxis=dict(
+                categoryorder="array",
+                categoryarray=df_MédiaSetor.sort_values("Gestor")["Nome"].tolist()
+            )
+        )
+        fig_Setor.update_traces(
+            texttemplate="%{text:.1f}",
+            textposition="outside",
+            cliponaxis=False
         )
         
         plotly_config_setor = {
@@ -387,28 +439,4 @@ else:
         }
         st.plotly_chart(fig_Setor, use_container_width=True, config=plotly_config_setor)
 
-        # ---------------------------------------------
-        # Matriz Consolidada de Médias por Competência
-        st.write("### Matriz Consolidada de Médias por Competência")
-        exibir_matriz = st.checkbox("Exibir Tabela de Médias das Competências por Avaliado", value=False)
-        if exibir_matriz:
-            col_sel1, col_sel2 = st.columns([2, 2])
-            with col_sel1:
-                tipo_visao = st.selectbox(
-                    "Tipo de Média na Matriz:",
-                    ["Média do Gestor"]
-                )
-            
-            matriz_df = df_equipe.pivot_table(
-                index="Nome", columns="Compet", values="Gestor", aggfunc="mean"
-            ).round(2)
-
-            # Adicionar coluna com Média Geral do Colaborador
-            matriz_df["Média Geral"] = matriz_df.mean(axis=1).round(2)
-            matriz_df = matriz_df.sort_values(by="Média Geral", ascending=False)
-            
-            st.dataframe(
-                matriz_df.fillna("-"),
-                use_container_width=True
-            )
 
